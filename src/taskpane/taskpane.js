@@ -4,79 +4,107 @@
  */
 
 /* global console, document, Excel, Office */
-
 Office.onReady((info) => {
   if (info.host === Office.HostType.Excel) {
     // document.getElementById("sideload-msg").style.display = "none";
     // document.getElementById("app-body").style.display = "flex";
-    document.getElementById("run").onclick = getData;
-    document.getElementById("sheet-data").onclick = getSheetData;
+    document.getElementById("run").onclick = fetchData;
+    document.getElementById("sheet-data").onclick = readSheetData;
+    document.getElementById("userName").onkeyup = resetError;
   }
 });
 
-export async function getSheetData() {
+export async function readSheetData() {
   try {
     await Excel.run(async (context) => {
       let sheet = context.workbook.worksheets.getActiveWorksheet();
-      let data = sheet.toJSON();
+      let range = sheet.getUsedRange();
+      // Load the values from the range
+      range.load("values");
+
+      // Synchronize the document state by executing the queued commands
       await context.sync();
-      console.log(data);
+
+      // Access the values
+      let values = range.values;
+
+      // Get the headers from the first row
+      let headers = values[0];
+
+      // Create an array of JSON objects
+      let jsonArray = [];
+
+      // Iterate over the remaining rows
+      for (let i = 1; i < values.length; i++) {
+        let row = values[i];
+        let jsonObject = {};
+
+        // Iterate over the cells in the row and assign values to the corresponding headers
+        for (let j = 0; j < headers.length; j++) {
+          let header = headers[j];
+          let value = row[j];
+          jsonObject[header] = value;
+        }
+
+        jsonArray.push(jsonObject);
+      }
+
+      // Print the resulting JSON object array
+      document.getElementById("api-data").innerHTML = JSON.stringify(jsonArray);
+      console.log(JSON.stringify(jsonArray));
     });
   } catch (error) {
     console.error(error);
   }
 }
 
-export async function run() {
+export async function fetchData() {
   try {
-    await Excel.run(async (context) => {
-      /**
-       * Insert your Excel code here
-       */
-      const range = context.workbook.getSelectedRange();
+    Excel.run(async (context) => {
+      let sheet = context.workbook.worksheets.getActiveWorksheet();
 
-      // Read the range address
-      range.load("address");
+      var usedRange = sheet.getUsedRange(true);
 
-      // Update the fill color
-      range.format.fill.color = "yellow";
-
+      usedRange.load("rowCount");
       await context.sync();
-      console.log(`The range address was ${range.address}.`);
-    });
-  } catch (error) {
-    console.error(error);
-  }
-}
 
-export async function getData() {
-  try {
-    const userName = document.getElementById("userName").value;
-    fetch(`https://api.github.com/users/${userName}`)
-      .then((response) => {
-        return response.json();
-      })
-      .then((data) => {
-        document.getElementById("api-data").innerHTML = JSON.stringify(data);
-        setSheetData(data);
-      });
+      var nameRange = sheet.getRangeByIndexes(1, 0, usedRange.rowCount, 1);
+
+      nameRange.load("values");
+      await context.sync();
+
+      const userName = document.getElementById("userName").value;
+      var values = nameRange.values;
+
+      if (values.flatMap(value => value[0]).includes(userName)) {
+       document.getElementById("userNameError").innerText = "user already added";
+        return;
+      }
+      fetch(`https://api.github.com/users/${userName}`)
+        .then((response) => {
+          return response.json();
+        })
+        .then((data) => {
+          setSheetData(data);
+        });
+
+      context.sync();
+    });
   } catch (error) {
     console.log(error);
   }
 }
 
-export async function setSheetData(data) {
-  setHeader(data);
-  //await setData(productData);
+function resetError(){
+  document.getElementById("userNameError").innerText = "";
 }
 
-var rowIndex = 1;
-export async function setHeader(data) {
+export async function setSheetData(data) {
+  let productData = [[]];
+  let headers = [Object.keys(data)];
   Excel.run(async (context) => {
     let sheet = context.workbook.worksheets.getActiveWorksheet();
-
     // // Create the headers and format them to stand out.
-    let headers = [Object.keys(data)];
     let headerRange = sheet.getRangeByIndexes(0, 0, 1, headers[0].length);
 
     headerRange.values = headers;
@@ -85,35 +113,31 @@ export async function setHeader(data) {
     headerRange.format.font.bold = true;
 
     // Create the product data rows.
-    let productData = [[]];
 
     headers[0].forEach((header) => {
       productData[0].push(data[header]);
     });
 
-    let dataRange = sheet.getRangeByIndexes(rowIndex, 0, 1, productData[0].length);
-    rowIndex++;
+    await context.sync();
+
+    let usedRange = sheet.getUsedRange();
+    usedRange.load("rowCount");
+
+    await context.sync();
+
+    let dataRange = sheet.getRangeByIndexes(usedRange.rowCount, 0, 1, productData[0].length);
+
     dataRange.values = productData;
     dataRange.format.font.color = "black";
     dataRange.format.autofitColumns();
     await context.sync();
 
-    return productData;
-  });
-}
-
-export async function setData(productData) {
-  Excel.run(async (context) => {
-    let sheet = context.workbook.worksheets.getActiveWorksheet();
-    //let usedRange = sheet.getUsedRange();
-
-    // Find the next empty row
-    // let nextRow = usedRange.rowIndex + usedRange.rowCount;
-
-    let dataRange = sheet.getRangeByIndexes(1, 0, 1, productData[0].length);
-    dataRange.values = productData;
-    dataRange.format.font.color = "black";
-    dataRange.format.autofitColumns();
-    await context.sync();
+    // sheet.onChanged("cellValueChanged", (cell) => {
+    //   const updatedValue = cell.value;
+    //   const rowNumber = cell.row.number;
+    //   const columnNumber = cell.column.number;
+    //   // Perform necessary actions to sync the updated value with your database
+    //   console.log(`Value updated: ${updatedValue}, row number: ${rowNumber}`);
+    // });
   });
 }
